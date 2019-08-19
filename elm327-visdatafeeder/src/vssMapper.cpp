@@ -31,16 +31,14 @@ typedef double Double;
 typedef bool Boolean;
 
 // Utility tokenizer.
-int tokenizeResponse(char** tokens, string response) {
-  char* cString = strdup(response.c_str());
-  char* tok = strtok(cString, " ");
-  int i = 0;
-  while (tok != NULL) {
-    tokens[i++] = strdup(tok);
-    tok = strtok(NULL, " ");
+int tokenizeResponse(string tokens[], const string response) {
+  string copy_response = string(response);
+  int length = copy_response.length();
+  int nos = 0;
+  for(int i=0 ; i<length ; i+=2) {
+     tokens[nos++] = copy_response.substr(i, 2);
   }
-  free(cString);
-  return i;
+  return nos;
 }
 
 // Utility method to create W3C-VIS SET request
@@ -54,23 +52,28 @@ json setRequest(string path) {
 
 // Reads RPM from the vehicle and packs the response in w3c-VIS SET request.
 string setRPM() {
-  string readBuf = readMode1Data("01 0C\r");
-  int pos = readBuf.find("41 0C", 0);
+  string readBuf = readMode1Data("01 0C\r\n");
+  int pos = readBuf.find("410C", 0);
 
   if (pos == -1) {
     cout << "Response " << readBuf << " not valid for RPM" << endl;
     return "Error";
-  }
+  } 
 
-  string response = readBuf.substr(pos, 12);
+  string response = readBuf.substr(pos);
 
   if (response.empty()) {
     cout << "RPM Data is NULL form vehicle!" << endl;
     return "Error";
   }
 
-  char* tokens[4];
-  tokenizeResponse(tokens, response);
+  string tokens[32];
+  int toknos = tokenizeResponse(tokens, response);
+
+  if (toknos != 4) {
+     cout << "The response does not match exactly as expected. Expected 4 tokens got only "<< toknos << endl;
+     return "Error";
+  }
 
   if (string(tokens[1]) != "0C") {
     cout << "PID not matching for RPM!" << endl;
@@ -96,8 +99,8 @@ string setRPM() {
 // Reads Engine speed from the vehicle and packs the response in w3c-VIS SET
 // request.
 string setVehicleSpeed() {
-  string readBuf = readMode1Data("01 0D\r");
-  int pos = readBuf.find("41 0D", 0);
+  string readBuf = readMode1Data("01 0D\r\n");
+  int pos = readBuf.find("410D", 0);
 
   if (pos == -1) {
     cout << "Response " << readBuf << " not valid for Vehicle speed" << endl;
@@ -110,15 +113,20 @@ string setVehicleSpeed() {
     cout << "Vehicle Speed Data is NULL form vehicle!" << endl;
     return "Error";
   }
-  char* tokens[3];
-  tokenizeResponse(tokens, response);
+  string tokens[32];
+  int toknos = tokenizeResponse(tokens, response);
+
+  if (toknos != 3) {
+     cout << "The response does not match exactly as expected. Expected 3 tokens got only "<< toknos << endl;
+     return "Error";
+  }
 
   if (string(tokens[1]) != "0D") {
     cout << "PID not matching for vehicle speed!" << endl;
     return "Error";
   }
 
-  int A = stoi(string(tokens[2]), nullptr, 16);
+  int A = stoi(tokens[2], nullptr, 16);
 
   Int32 value = A;
 #ifdef DEBUG
@@ -136,8 +144,8 @@ string setVehicleSpeed() {
 // Reads Fuel status from the vehicle and packs the response in w3c-VIS SET
 // request.
 string setFuelLevel() {
-  string readBuf = readMode1Data("01 2F\r");
-  int pos = readBuf.find("41 2F", 0);
+  string readBuf = readMode1Data("01 2F\r\n");
+  int pos = readBuf.find("412F", 0);
 
   if (pos == -1) {
     cout << "Response not valid for Fuel level" << endl;
@@ -147,18 +155,23 @@ string setFuelLevel() {
   string response = readBuf.substr(pos, 9);
 
   if (response.empty()) {
-    cout << "Fuel level Vehicle Speed Data is NULL form vehicle!" << endl;
+    cout << "Fuel level Data is NULL form vehicle!" << endl;
     return "Error";
   }
-  char* tokens[3];
-  tokenizeResponse(tokens, response);
+  string tokens[32];
+  int toknos = tokenizeResponse(tokens, response);
 
-  if (string(tokens[1]) != "2F") {
+  if (toknos != 3) {
+     cout << "The response does not match exactly as expected. Expected 3 tokens got only "<< toknos << endl;
+     return "Error";
+  }
+
+  if (tokens[1] != "2F") {
     cout << "PID not matching for Fuel level!" << endl;
     return "Error";
   }
 
-  int A = stoi(string(tokens[2]), nullptr, 16);
+  int A = stoi(tokens[2], nullptr, 16);
 
   Int32 value = A;
   value = (value * 100) / 255;
@@ -195,6 +208,8 @@ string createDTCJson(string dtcCode) {
   } else if (dtcCode == "0109") {
     req = setRequest("Signal.OBD.DTC6");
     req["value"] = true;
+  } else {
+    return "";
   }
   stringstream ss;
   ss << pretty_print(req);
@@ -219,16 +234,20 @@ list<string> readErrors() {
   }
 
   string response = readBuf.substr(pos);
-
-  cout << response << endl;
+  
   if (response.empty()) {
     cout << "DTC Data is NULL from vehicle!" << endl;
     return errorList;
   }
-  char* tokens[64];
-  int tknos = tokenizeResponse(tokens, response);
+  string tokens[64];
+  int toknos = tokenizeResponse(tokens, response);
 
-  int dtcNos = stoi(string(tokens[1]), nullptr, 10);
+  if (toknos < 2) {
+     cout << "The response does not match exactly as expected. Expected atleast 2 tokens for DTC got only "<< toknos << endl;
+     return errorList;
+  }
+
+  int dtcNos = stoi(tokens[1], nullptr, 10);
 #ifdef DEBUG
   cout << "" << dtcNos << " Errors found" << endl;
 #endif
@@ -241,7 +260,9 @@ list<string> readErrors() {
       ss << tokens[2 + i];
 
       string dtcCode = ss.str();
-      errorList.push_back(createDTCJson(dtcCode));
+      string dtc_request = createDTCJson(dtcCode);
+      if (!dtc_request.empty())
+         errorList.push_back(dtc_request);
     }
   } else if (dtcNos == 0) {
     // clear all errors.

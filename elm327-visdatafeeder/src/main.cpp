@@ -106,7 +106,7 @@ void* elmActualValuesRun(void* arg) {
     }
     count++;
   }
-  cout << "Exited the elm AVs update thread" << endl;
+  cout << "Exited the elm AVs update thread" << endl; 
 }
 
 // Thread that updates the Errors ( DTCs)
